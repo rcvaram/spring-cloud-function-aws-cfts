@@ -1,0 +1,113 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Cloudformation template for Git Code Build
+
+Parameters:  
+  PermissionBoundaryARN:
+    Type: String
+    Description: Permission boundary for creating IAM policy
+  VPCID:
+    Description: Id of and existing VPC
+    Type: "AWS::EC2::VPC::Id"
+    ConstraintDescription: Must be a valid VPC.
+  SubnetId:
+    Description: "Private subnet for confidential apps"
+    Type: "AWS::EC2::Subnet::Id"
+    MinLength: 1
+    MaxLength: 255
+    ConstraintDescription: Must be a valid Private Subnet.
+  GithubSource:
+    Description: "Github repo source"
+    Type: String
+    MinLength: 1
+    MaxLength: 255
+
+Resources:
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        "Fn::Join": ["", ["CodeBuildRole", "-", !Ref "AWS::StackName"]]
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - "codebuild.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      PermissionsBoundary: !Ref PermissionBoundaryARN
+      Path: /service-role/
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:PutParameter
+                  - ssm:DeleteParameter
+                  - ssm:GetParameterHistory
+                  - ssm:GetParametersByPath
+                  - ssm:GetParameters
+                  - ssm:GetParameter
+                  - ssm:DeleteParameters
+                  - ssm:DescribeParameters
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeVpcs
+                  - ec2:DescribeDhcpOptions
+                  - ec2:CreateNetworkInterfacePermission
+                  - ec2:CreateNetworkInterface
+                  - ec2:DeleteNetworkInterfacePermission
+                  - ec2:DeleteNetworkInterface
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - s3:CreateBucket
+                  - s3:DeleteBucket
+                  - s3:ListBucket
+                  - s3:ListBucketVersions
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:DeleteObject
+                Resource:
+                  - "*"
+  CodeBuild:
+    Type: "AWS::CodeBuild::Project"
+    Properties:
+      Name: !Sub ${AWS::StackName}-Code-Review
+      Description: !Sub ${AWS::StackName} Code Review Build
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:3.0
+      Source:
+        Type: GITHUB_ENTERPRISE
+        Location: !Ref GithubSource
+        BuildSpec: "buildspec-git.yaml"
+      VpcConfig:
+        VpcId: !Ref VPCID
+        SecurityGroupIds:
+          - !Ref CodeBuildSecurityGroup
+        Subnets:
+          - !Ref SubnetId    
+  CodeBuildSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${AWS::StackName} CodeBuild Security Group
+      GroupDescription: "Git Codebuild security group"
+      VpcId: !Ref VPCID
+
+Outputs:
+  CodeBuild:
+    Value: !Ref CodeBuild
+  CodeBuildRole:
+    Value: !Ref CodeBuildRole
